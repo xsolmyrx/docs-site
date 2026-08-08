@@ -103,6 +103,17 @@ function extractJson(text) {
 }
 
 export async function onRequestPost(context) {
+  try {
+    return await handleGenerate(context);
+  } catch (e) {
+    // Absolute last-resort safety net: guarantees a JSON response no matter
+    // what goes wrong above, so the front-end never sees a non-JSON error
+    // page (which is what produces the unhelpful "network error" message).
+    return new Response(JSON.stringify({ error: `Unexpected server error: ${String(e && e.message || e)}` }), { status: 500, headers: { 'Content-Type': 'application/json' } });
+  }
+}
+
+async function handleGenerate(context) {
   const { request, env } = context;
 
   if (!env.ANTHROPIC_API_KEY) {
@@ -194,8 +205,13 @@ export async function onRequestPost(context) {
     return new Response(JSON.stringify({ error: `Claude API error (${claudeRes.status}): ${errText.slice(0, 300)}` }), { status: 502, headers: { 'Content-Type': 'application/json' } });
   }
 
-  const data = await claudeRes.json();
-  const rawText = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+  let data, rawText;
+  try {
+    data = await claudeRes.json();
+    rawText = (data.content || []).filter(b => b.type === 'text').map(b => b.text).join('\n').trim();
+  } catch (e) {
+    return new Response(JSON.stringify({ error: `Could not parse Claude's response as JSON: ${String(e.message || e)}` }), { status: 502, headers: { 'Content-Type': 'application/json' } });
+  }
 
   const sources = results.map(r => ({
     doc: r.doc,
