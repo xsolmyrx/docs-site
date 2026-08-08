@@ -302,17 +302,28 @@
     }).filter(Boolean);
   }
 
-  function initPatchbay(){
+  function populatePatchbayDocs(){
     const selA = document.getElementById('patchbay-doc-a');
     const selB = document.getElementById('patchbay-doc-b');
     const docIds = Object.keys(state.docs);
     const opts = docIds.map(id => `<option value="${escapeHtml(id)}">${escapeHtml(DOC_META[id].title)}</option>`).join('');
+    const prevA = selA.value, prevB = selB.value;
     selA.innerHTML = '<option value="">Choose a document…</option>' + opts;
     selB.innerHTML = '<option value="">Choose a document…</option>' + opts;
+    if(docIds.includes(prevA)) selA.value = prevA;
+    if(docIds.includes(prevB)) selB.value = prevB;
+    if(!selA.value && docIds.length >= 1) selA.value = docIds[0];
+    if(!selB.value && docIds.length >= 2) selB.value = docIds.find(id => id !== selA.value) || '';
+  }
+
+  function initPatchbay(){
+    const selA = document.getElementById('patchbay-doc-a');
+    const selB = document.getElementById('patchbay-doc-b');
     selA.addEventListener('change', renderPatchbay);
     selB.addEventListener('change', renderPatchbay);
-    if(docIds.length >= 2){ selA.value = docIds[0]; selB.value = docIds[1]; renderPatchbay(); }
     window.addEventListener('resize', debounce(drawCables, 150));
+    populatePatchbayDocs();
+    renderPatchbay();
   }
 
   function renderPatchbay(){
@@ -889,11 +900,12 @@
         if(!res.ok || data.error){
           resultEl.innerHTML = `<p class="patch-hint">Error: ${escapeHtml(data.error || 'Upload failed.')}</p>`;
         } else {
-          resultEl.innerHTML = `<p class="upload-success">✓ "${escapeHtml(data.title)}" uploaded — ${data.pages} pages, ${data.chunks} chunks, by ${escapeHtml(data.uploaded_by)}.</p>`;
+          resultEl.innerHTML = `<p class="upload-success">✓ "${escapeHtml(data.title)}" uploaded — ${data.pages} pages, ${data.chunks} chunks, by ${escapeHtml(data.uploaded_by)}. Refreshing every tab with the new data…</p>`;
           fields.hidden = true;
           dropText.textContent = 'Choose a PDF, or drag one here';
           fileInput.value = '';
           selectedFile = null;
+          await refreshAllData();
           loadUploadedDocs();
         }
       } catch(e){
@@ -950,6 +962,7 @@
             const res = await fetch(`/api/documents/${encodeURIComponent(id)}`, { method: 'DELETE' });
             const data = await res.json();
             if(!res.ok || data.error){ alert('Delete failed: ' + (data.error || 'unknown')); btn.disabled = false; return; }
+            await refreshAllData();
             loadUploadedDocs();
           } catch(e){
             alert('Delete failed: ' + e.message);
@@ -1039,7 +1052,18 @@
         method: 'POST', headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ question: question.trim(), mode })
       });
-      const data = await res.json();
+      const raw = await res.text();
+      let data;
+      try{ data = JSON.parse(raw); }
+      catch(parseErr){
+        const looksLikeLogin = /Cloudflare Access|Log in to/i.test(raw);
+        outputEl.innerHTML = `<p class="patch-hint">${
+          looksLikeLogin
+            ? 'The request hit a Cloudflare Access login page instead of the API — your session may have lapsed. Try reloading the page and logging in again.'
+            : `Server returned something that wasn't valid JSON (status ${res.status}). First 200 chars: ${escapeHtml(raw.slice(0,200))}`
+        }</p>`;
+        return;
+      }
       if(!res.ok || data.error){
         outputEl.innerHTML = `<p class="patch-hint">Error: ${escapeHtml(data.error || 'Something went wrong.')}</p>`;
         return;
@@ -1048,7 +1072,7 @@
       else if(data.answer) outputEl.innerHTML = `<p class="patch-hint">${escapeHtml(data.answer)}</p>`;
       if(sourcesEl && data.sources) renderSources(sourcesEl, data.sources);
     } catch(e){
-      outputEl.innerHTML = '<p class="patch-hint">Network error reaching /api/generate.</p>';
+      outputEl.innerHTML = `<p class="patch-hint">Network error reaching /api/generate: ${escapeHtml(String(e.message || e))}</p>`;
     } finally {
       button.disabled = false;
     }
@@ -1213,7 +1237,16 @@
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ question: question.trim(), mode })
       });
-      const data = await res.json();
+      const raw = await res.text();
+      let data;
+      try{ data = JSON.parse(raw); }
+      catch(parseErr){
+        const looksLikeLogin = /Cloudflare Access|Log in to/i.test(raw);
+        outputEl.textContent = looksLikeLogin
+          ? 'The request hit a Cloudflare Access login page instead of the API — your session may have lapsed. Try reloading the page and logging in again.'
+          : `Server returned something that wasn't valid JSON (status ${res.status}). First 200 chars: ${raw.slice(0,200)}`;
+        return;
+      }
       if(!res.ok || data.error){
         outputEl.textContent = 'Error: ' + (data.error || 'Something went wrong.');
         return;
@@ -1221,7 +1254,7 @@
       outputEl.textContent = data.answer;
       renderSources(sourcesEl, data.sources);
     } catch(e){
-      outputEl.textContent = 'Network error reaching /api/generate. If this site was deployed via Direct Upload rather than Git, functions/ may not have been included — check the deployment includes the functions folder.';
+      outputEl.textContent = `Network error reaching /api/generate: ${String(e.message || e)}`;
     } finally {
       button.disabled = false;
     }
@@ -1284,6 +1317,23 @@
     initInsights();
     initBinder();
     initUpload();
+  }
+
+  // Called after an upload or delete — re-pulls /api/documents + chunks and
+  // re-renders every data-driven view, WITHOUT re-attaching any event
+  // listeners (that's what init() does once, at startup — calling those
+  // init* functions again would duplicate listeners and cause things like
+  // double-submitted requests).
+  async function refreshAllData(){
+    await loadData();
+    renderHeroStats();
+    renderLibrary();
+    renderSearchFilters();
+    populatePatchbayDocs();
+    renderPatchbay();
+    renderConceptGraph();
+    renderChunkDocSelector();
+    renderChunkStrip();
   }
 
   document.addEventListener('DOMContentLoaded', init);
