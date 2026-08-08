@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Docs — Document Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+</head>
+<body>
+
+<div class="rack-texture" aria-hidden="true"></div>
+
+<header class="topbar">
+  <div class="topbar-inner">
+    <div class="brand">
+      <span class="brand-mark">DOCS</span>
+      <span class="brand-sub">Document Intelligence Sandbox</span>
+    </div>
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-view="library">Library</button>
+      <button class="tab" data-view="search">Search</button>
+      <button class="tab" data-view="patchbay">Patch Bay</button>
+      <button class="tab" data-view="graph">Concept Graph</button>
+      <button class="tab" data-view="flow">Process Flow</button>
+      <button class="tab" data-view="brief">Brief Generator</button>
+      <button class="tab" data-view="chunks">Chunk Explorer</button>
+      <button class="tab" data-view="insights">AI Insights</button>
+      <button class="tab" data-view="binder">Binder <span class="tab-badge" id="binder-count" hidden>0</span></button>
+    </nav>
+  </div>
+</header>
+
+<main>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="hero-inner">
+      <div class="hero-text">
+        <p class="eyebrow">Prototype &middot; Phase 1 &middot; Static</p>
+        <h1>Two manuals.<br>One patch bay.</h1>
+        <p class="hero-lede">A working sandbox for cross-referencing technical documentation &mdash; built here on <strong>Telviva Enswitch 4.2</strong> and <strong>QueueMetrics 26.01</strong>, two systems that already talk to each other over Asterisk. The same mechanics scale to legal document sets: chunking, search, cross-referencing, and eventually retrieval-backed narrative synthesis.</p>
+        <div class="hero-stats" id="hero-stats"><!-- filled by js --></div>
+      </div>
+      <div class="hero-visual" aria-hidden="true">
+        <svg id="hero-patchbay" viewBox="0 0 460 320" xmlns="http://www.w3.org/2000/svg"></svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- LIBRARY -->
+  <section class="view active" id="view-library">
+    <div class="section-head">
+      <h2>Library</h2>
+      <p>Every document loaded into this sandbox, chunked on ingest.</p>
+    </div>
+    <div class="card-grid" id="library-cards"><!-- filled by js --></div>
+  </section>
+
+  <!-- SEARCH -->
+  <section class="view" id="view-search">
+    <div class="section-head">
+      <h2>Search</h2>
+      <p>Full-text, client-side, across both documents at once. This is real &mdash; no mock data.</p>
+    </div>
+    <div class="search-bar">
+      <input type="text" id="search-input" placeholder="Try &ldquo;queue&rdquo;, &ldquo;asterisk&rdquo;, &ldquo;recording&rdquo;, &ldquo;wallboard&rdquo;&hellip;" autocomplete="off">
+      <div class="search-filters" id="search-filters">
+        <button class="filter-chip active" data-doc="all">Both docs</button>
+        <button class="filter-chip" data-doc="telviva">Telviva 4.2</button>
+        <button class="filter-chip" data-doc="queuemetrics">QueueMetrics</button>
+      </div>
+    </div>
+    <div class="search-meta" id="search-meta">Type to search across 26,000+ and 116,000+ words of extracted text.</div>
+    <div class="search-results" id="search-results"></div>
+  </section>
+
+  <!-- PATCH BAY -->
+  <section class="view" id="view-patchbay">
+    <div class="section-head">
+      <h2>Patch Bay</h2>
+      <p>Terms that surface meaningfully in <em>both</em> manuals, patched together like a switchboard. Click a jack to route the connection.</p>
+    </div>
+    <div class="patchbay-wrap">
+      <div class="patchbay-panel">
+        <div class="panel-label">Telviva 4.2</div>
+        <div class="jack-column" id="jacks-telviva"></div>
+      </div>
+      <div class="patchbay-cables">
+        <svg id="cable-svg" viewBox="0 0 200 600" preserveAspectRatio="none"></svg>
+      </div>
+      <div class="patchbay-panel">
+        <div class="panel-label">QueueMetrics 26.01</div>
+        <div class="jack-column" id="jacks-queuemetrics"></div>
+      </div>
+    </div>
+    <div class="patch-detail" id="patch-detail">
+      <p class="patch-hint">Select a term above to see the matched passage from each manual, side by side.</p>
+    </div>
+  </section>
+
+  <!-- CONCEPT GRAPH -->
+  <section class="view" id="view-graph">
+    <div class="section-head">
+      <h2>Concept Graph</h2>
+      <p>Every significant term across both manuals, mapped by how often they appear together. Teal nodes are concepts that surface in <em>both</em> documents &mdash; the connective tissue of the whole corpus. Click any node to see where it actually appears.</p>
+    </div>
+    <div class="graph-legend">
+      <span><i class="dot dot-shared"></i> Appears in both</span>
+      <span><i class="dot dot-tv"></i> Telviva only</span>
+      <span><i class="dot dot-qm"></i> QueueMetrics only</span>
+      <span class="graph-legend-sep">·</span>
+      <span><i class="edge-sample edge-cross"></i> Cross-document link</span>
+      <span><i class="edge-sample edge-same"></i> Same-document link</span>
+    </div>
+    <div class="graph-wrap">
+      <svg id="concept-svg" viewBox="0 0 900 560" preserveAspectRatio="xMidYMid meet"></svg>
+    </div>
+    <div class="graph-detail" id="graph-detail">
+      <p class="patch-hint">Click a concept above to see every passage that mentions it, across both manuals.</p>
+    </div>
+  </section>
+
+  <!-- PROCESS FLOW -->
+  <section class="view" id="view-flow">
+    <div class="section-head">
+      <h2>Process Flow</h2>
+      <p>Turn a topic into an ordered, cited sequence of steps reconstructed from both manuals &mdash; the same mechanic that, on a case file, would rebuild a chain of custody or an approval path from scattered filings.</p>
+    </div>
+    <p class="drafting-note">Drafting aid, not legal or technical advice &mdash; verify every step against the source before relying on it.</p>
+    <div class="ask-box">
+      <select id="flow-preset">
+        <option value="">Choose a topic, or type your own below…</option>
+        <option value="The life of a queued call, from arrival to answer to reporting">The life of a queued call, from arrival to answer to reporting</option>
+        <option value="Setting up call recording in Telviva through to QA review in QueueMetrics">Setting up call recording through to QA review</option>
+      </select>
+    </div>
+    <textarea id="flow-question" class="ask-textarea" placeholder="Describe the process you want reconstructed…" rows="2"></textarea>
+    <button id="flow-run" class="btn-primary">Generate flow</button>
+    <div id="flow-output" class="flow-output"></div>
+  </section>
+
+  <!-- BRIEF GENERATOR -->
+  <section class="view" id="view-brief">
+    <div class="section-head">
+      <h2>Brief Generator</h2>
+      <p>Turn a topic into a structured briefing memo &mdash; overview, key definitions, cross-references between the documents, and open questions a reviewer should still chase down.</p>
+    </div>
+    <p class="drafting-note">Drafting aid, not legal advice &mdash; every citation should be checked against the original document before you rely on it.</p>
+    <div class="ask-box">
+      <select id="brief-preset">
+        <option value="">Choose a topic, or type your own below…</option>
+        <option value="Call recording and quality assurance">Call recording and quality assurance</option>
+        <option value="Queue behaviour and reporting">Queue behaviour and reporting</option>
+      </select>
+    </div>
+    <textarea id="brief-question" class="ask-textarea" placeholder="Describe the topic to brief…" rows="2"></textarea>
+    <button id="brief-run" class="btn-primary">Generate brief</button>
+    <div id="brief-output" class="brief-output"></div>
+  </section>
+
+  <!-- CHUNK EXPLORER -->
+  <section class="view" id="view-chunks">
+    <div class="section-head">
+      <h2>Chunk Explorer</h2>
+      <p>How each document was split for retrieval. Every segment below is a real chunk with page provenance &mdash; hover to inspect.</p>
+    </div>
+    <div class="chunk-doc-select" id="chunk-doc-select">
+      <button class="filter-chip active" data-doc="telviva">Telviva 4.2 &middot; <span id="chunk-count-telviva">&mdash;</span> chunks</button>
+      <button class="filter-chip" data-doc="queuemetrics">QueueMetrics &middot; <span id="chunk-count-queuemetrics">&mdash;</span> chunks</button>
+    </div>
+    <div class="chunk-strip" id="chunk-strip"></div>
+    <div class="chunk-detail" id="chunk-detail">
+      <p class="patch-hint">Hover or tap a segment to preview that chunk.</p>
+    </div>
+    <div class="chunk-stats" id="chunk-stats"></div>
+  </section>
+
+  <!-- AI INSIGHTS -->
+  <section class="view" id="view-insights">
+    <div class="section-head">
+      <h2>AI Insights</h2>
+      <p>Retrieval meets generation, live. Every answer below is genuinely generated by Claude from real retrieved passages &mdash; nothing here is pre-written.</p>
+    </div>
+    <p class="drafting-note">Drafting aid, not legal advice &mdash; treat everything below as a starting point for review, not a conclusion.</p>
+
+    <div class="insight-grid">
+      <div class="insight-card">
+        <div class="insight-card-head">
+          <h3>Ask across documents</h3>
+          <span class="demo-badge live-badge">Live</span>
+        </div>
+        <p class="insight-desc">Ask a question that spans both manuals. This retrieves the top matching chunks and asks Claude to answer strictly from them, with citations back to page numbers.</p>
+        <div class="ask-box">
+          <select id="ask-preset">
+            <option value="">Choose a sample question, or type your own below…</option>
+            <option value="How would a dropped call get investigated across both systems?">How would a dropped call get investigated across both systems?</option>
+            <option value="Where do Telviva and QueueMetrics both define &quot;queue&quot;, and do the definitions agree?">Where do Telviva and QueueMetrics both define "queue", and do the definitions agree?</option>
+            <option value="What configuration steps are shared between call recording in Telviva and QA review in QueueMetrics?">What configuration steps are shared between call recording and QA review?</option>
+          </select>
+        </div>
+        <textarea id="ask-question" class="ask-textarea" placeholder="Or ask your own question about either manual…" rows="2"></textarea>
+        <button id="ask-run" class="btn-primary">Generate answer</button>
+        <div id="ask-output" class="ai-output"></div>
+        <div id="ask-sources" class="ai-sources"></div>
+      </div>
+
+      <div class="insight-card">
+        <div class="insight-card-head">
+          <h3>Story Mode</h3>
+          <span class="demo-badge live-badge">Live</span>
+        </div>
+        <p class="insight-desc">Turns a cross-referenced cluster of chunks into a plain-language narrative &mdash; the same mechanic that, on a legal document set, would turn a folder of filings into a coherent case timeline.</p>
+        <div class="ask-box">
+          <select id="story-preset">
+            <option value="">Choose a cluster to narrate, or type your own below…</option>
+            <option value="The life of a queued call, from arrival to answer to reporting">The life of a queued call, from arrival to answer to reporting</option>
+            <option value="Setting up call recording in Telviva through to QA review in QueueMetrics">Setting up call recording, end to end</option>
+          </select>
+        </div>
+        <textarea id="story-question" class="ask-textarea" placeholder="Or describe your own topic to narrate…" rows="2"></textarea>
+        <button id="story-run" class="btn-primary">Generate story</button>
+        <div id="story-output" class="ai-output"></div>
+        <div id="story-sources" class="ai-sources"></div>
+      </div>
+
+      <div class="insight-card insight-card-wide">
+        <div class="insight-card-head">
+          <h3>Conflict Finder</h3>
+          <span class="demo-badge live-badge">Live</span>
+        </div>
+        <p class="insight-desc">The feature a legal document set actually needs: instead of answering a question, this actively hunts for places where the two manuals define, describe, or handle the same thing <em>differently</em> &mdash; contradictions, terminology drift, or gaps between them. On a real case file, this is how you'd find where a witness statement conflicts with a contract, or where two filings disagree.</p>
+        <div class="ask-box">
+          <select id="conflict-preset">
+            <option value="">Choose a topic to check for conflicts, or type your own below…</option>
+            <option value="How each system defines and measures a &quot;queue&quot;">How each system defines and measures a "queue"</option>
+            <option value="Call recording — who controls it and how it's accessed">Call recording — who controls it and how it's accessed</option>
+            <option value="What counts as an &quot;answered&quot; call">What counts as an "answered" call</option>
+          </select>
+        </div>
+        <textarea id="conflict-question" class="ask-textarea" placeholder="Or name a topic covered in both manuals to check for conflicts…" rows="2"></textarea>
+        <button id="conflict-run" class="btn-primary">Find conflicts</button>
+        <div id="conflict-output" class="ai-output"></div>
+        <div id="conflict-sources" class="ai-sources"></div>
+      </div>
+
+      <div class="insight-card insight-card-wide">
+        <div class="insight-card-head">
+          <h3>Devil's Advocate</h3>
+          <span class="demo-badge live-badge">Live</span>
+        </div>
+        <p class="insight-desc">Give it a claim or a position, and it looks for the strongest grounded pushback against it &mdash; genuine counterpoints from the documents, not manufactured ones. On a real case, this is how you stress-test your own argument before the other side does.</p>
+        <div class="ask-box">
+          <select id="devil-preset">
+            <option value="">Choose a sample claim, or type your own below…</option>
+            <option value="QueueMetrics gives a complete and reliable picture of agent performance on its own">QueueMetrics gives a complete and reliable picture of agent performance on its own</option>
+            <option value="Any call that was recorded in Telviva can be assumed to be reviewable in QueueMetrics">Any call that was recorded in Telviva can be assumed to be reviewable in QueueMetrics</option>
+          </select>
+        </div>
+        <textarea id="devil-question" class="ask-textarea" placeholder="State a claim or position to stress-test…" rows="2"></textarea>
+        <button id="devil-run" class="btn-primary">Stress-test this</button>
+        <div id="devil-output" class="devil-output"></div>
+        <div id="devil-sources" class="ai-sources"></div>
+      </div>
+    </div>
+
+    <div class="phase2-note">
+      <h3>How this works</h3>
+      <p>Each request retrieves the best-matching passages from both manuals (same mechanism as the Search tab), sends only those passages to Claude with instructions to answer strictly from them, and returns a real generated answer with page citations. Nothing is pre-written below this line.</p>
+    </div>
+  </section>
+
+  <!-- BINDER -->
+  <section class="view" id="view-binder">
+    <div class="section-head">
+      <h2>Binder</h2>
+      <p>Collect excerpts from anywhere in this site &mdash; Search, Chunk Explorer, Patch Bay, Concept Graph, or any AI Insights citation &mdash; into one ordered bundle, then export it as a real PDF. On a real case file, this is how you'd assemble an exhibit bundle from scattered documents.</p>
+    </div>
+    <p class="drafting-note">The exported PDF is a compilation of excerpts you selected, with citations &mdash; it is not a legal filing and hasn't been reviewed for accuracy or completeness. Verify everything against the original documents.</p>
+
+    <div class="binder-controls">
+      <input type="text" id="binder-title" class="binder-title-input" placeholder="Bundle title (e.g. &quot;Call Recording — Exhibit Bundle&quot;)" value="Excerpt Bundle">
+      <button id="binder-export" class="btn-primary">Export PDF</button>
+      <button id="binder-clear" class="btn-secondary">Clear binder</button>
+    </div>
+
+    <div id="binder-table-wrap">
+      <p class="patch-hint" id="binder-empty">Nothing added yet. Look for "＋ Add to Binder" wherever you expand a passage &mdash; Search results, Chunk Explorer, Patch Bay, Concept Graph, or any citation chip.</p>
+      <table class="binder-table" id="binder-table" hidden>
+        <thead>
+          <tr><th></th><th>Document</th><th>Pages</th><th>Excerpt</th><th></th></tr>
+        </thead>
+        <tbody id="binder-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <p>Document Intelligence &middot; built for <span class="mono">docs.radisic.co.za</span></p>
+</footer>
+
+<script src="app.js"></script>
+</body>
+</html>
