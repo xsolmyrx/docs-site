@@ -9,6 +9,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 </head>
 <body>
 
@@ -22,6 +23,7 @@
     </div>
     <nav class="tabs" id="tabs">
       <button class="tab active" data-view="library">Library</button>
+      <button class="tab" data-view="upload">Upload</button>
       <button class="tab" data-view="search">Search</button>
       <button class="tab" data-view="patchbay">Patch Bay</button>
       <button class="tab" data-view="graph">Concept Graph</button>
@@ -42,7 +44,7 @@
       <div class="hero-text">
         <p class="eyebrow">Prototype &middot; Phase 1 &middot; Static</p>
         <h1>Two manuals.<br>One patch bay.</h1>
-        <p class="hero-lede">A working sandbox for cross-referencing technical documentation &mdash; built here on <strong>Telviva Enswitch 4.2</strong> and <strong>QueueMetrics 26.01</strong>, two systems that already talk to each other over Asterisk. The same mechanics scale to legal document sets: chunking, search, cross-referencing, and eventually retrieval-backed narrative synthesis.</p>
+        <p class="hero-lede">A document intelligence workspace &mdash; upload PDFs, and it chunks, indexes, and cross-references them automatically. Search across everything at once, find where documents agree or contradict each other, and ask questions that get answered strictly from what's actually in your files, with citations back to the source page.</p>
         <div class="hero-stats" id="hero-stats"><!-- filled by js --></div>
       </div>
       <div class="hero-visual" aria-hidden="true">
@@ -60,21 +62,54 @@
     <div class="card-grid" id="library-cards"><!-- filled by js --></div>
   </section>
 
+  <!-- UPLOAD -->
+  <section class="view" id="view-upload">
+    <div class="section-head">
+      <h2>Upload</h2>
+      <p>Add a PDF to the library. Text is extracted directly in your browser (nothing is sent anywhere until you click Upload), then chunked and stored.</p>
+    </div>
+    <p class="drafting-note">Works best on text-based PDFs. Scanned/image-only pages won't extract usable text without OCR first &mdash; if a document comes back with zero chunks, that's likely why.</p>
+
+    <div class="upload-form">
+      <label class="upload-drop" id="upload-drop">
+        <input type="file" id="upload-file" accept="application/pdf" hidden>
+        <span id="upload-drop-label">Choose a PDF, or drag one here</span>
+      </label>
+
+      <div class="upload-fields" id="upload-fields" hidden>
+        <input type="text" id="upload-title" class="binder-title-input" placeholder="Document title">
+        <input type="text" id="upload-subtitle" class="binder-title-input" placeholder="Short description (optional)">
+        <button id="upload-run" class="btn-primary" type="button">Extract &amp; upload</button>
+      </div>
+
+      <div class="upload-progress" id="upload-progress" hidden>
+        <div class="upload-progress-bar"><div class="upload-progress-fill" id="upload-progress-fill"></div></div>
+        <p id="upload-progress-label">Extracting page 0 of 0…</p>
+      </div>
+
+      <div class="upload-result" id="upload-result"></div>
+    </div>
+
+    <div class="section-head" style="margin-top:36px;">
+      <h2>Uploaded documents</h2>
+      <p>Everything currently in the database. Deleting here removes the document and its chunks permanently.</p>
+    </div>
+    <div id="upload-doc-list"></div>
+  </section>
+
   <!-- SEARCH -->
   <section class="view" id="view-search">
     <div class="section-head">
       <h2>Search</h2>
-      <p>Full-text, client-side, across both documents at once. This is real &mdash; no mock data.</p>
+      <p>Full-text, client-side, across every uploaded document at once.</p>
     </div>
     <div class="search-bar">
-      <input type="text" id="search-input" placeholder="Try &ldquo;queue&rdquo;, &ldquo;asterisk&rdquo;, &ldquo;recording&rdquo;, &ldquo;wallboard&rdquo;&hellip;" autocomplete="off">
+      <input type="text" id="search-input" placeholder="Search across all uploaded documents…" autocomplete="off">
       <div class="search-filters" id="search-filters">
-        <button class="filter-chip active" data-doc="all">Both docs</button>
-        <button class="filter-chip" data-doc="telviva">Telviva 4.2</button>
-        <button class="filter-chip" data-doc="queuemetrics">QueueMetrics</button>
+        <button class="filter-chip active" data-doc="all">All documents</button>
       </div>
     </div>
-    <div class="search-meta" id="search-meta">Type to search across 26,000+ and 116,000+ words of extracted text.</div>
+    <div class="search-meta" id="search-meta">Upload a document to start searching.</div>
     <div class="search-results" id="search-results"></div>
   </section>
 
@@ -82,23 +117,28 @@
   <section class="view" id="view-patchbay">
     <div class="section-head">
       <h2>Patch Bay</h2>
-      <p>Terms that surface meaningfully in <em>both</em> manuals, patched together like a switchboard. Click a jack to route the connection.</p>
+      <p>Pick two documents to compare. Terms that surface meaningfully in <em>both</em> get patched together like a switchboard &mdash; click a jack to route the connection.</p>
     </div>
-    <div class="patchbay-wrap">
+    <div class="patchbay-picker">
+      <select id="patchbay-doc-a"><option value="">Choose a document…</option></select>
+      <span class="patchbay-vs">vs</span>
+      <select id="patchbay-doc-b"><option value="">Choose a document…</option></select>
+    </div>
+    <div class="patchbay-wrap" id="patchbay-wrap" hidden>
       <div class="patchbay-panel">
-        <div class="panel-label">Telviva 4.2</div>
-        <div class="jack-column" id="jacks-telviva"></div>
+        <div class="panel-label" id="patchbay-label-a"></div>
+        <div class="jack-column" id="jacks-a"></div>
       </div>
       <div class="patchbay-cables">
         <svg id="cable-svg" viewBox="0 0 200 600" preserveAspectRatio="none"></svg>
       </div>
       <div class="patchbay-panel">
-        <div class="panel-label">QueueMetrics 26.01</div>
-        <div class="jack-column" id="jacks-queuemetrics"></div>
+        <div class="panel-label" id="patchbay-label-b"></div>
+        <div class="jack-column" id="jacks-b"></div>
       </div>
     </div>
     <div class="patch-detail" id="patch-detail">
-      <p class="patch-hint">Select a term above to see the matched passage from each manual, side by side.</p>
+      <p class="patch-hint">Choose two documents above to find terms they share.</p>
     </div>
   </section>
 
@@ -110,8 +150,8 @@
     </div>
     <div class="graph-legend">
       <span><i class="dot dot-shared"></i> Appears in both</span>
-      <span><i class="dot dot-tv"></i> Telviva only</span>
-      <span><i class="dot dot-qm"></i> QueueMetrics only</span>
+      <span><i class="dot dot-tv"></i> Document-specific</span>
+      <span><i class="dot dot-qm"></i> Document-specific</span>
       <span class="graph-legend-sep">·</span>
       <span><i class="edge-sample edge-cross"></i> Cross-document link</span>
       <span><i class="edge-sample edge-same"></i> Same-document link</span>
@@ -131,13 +171,6 @@
       <p>Turn a topic into an ordered, cited sequence of steps reconstructed from both manuals &mdash; the same mechanic that, on a case file, would rebuild a chain of custody or an approval path from scattered filings.</p>
     </div>
     <p class="drafting-note">Drafting aid, not legal or technical advice &mdash; verify every step against the source before relying on it.</p>
-    <div class="ask-box">
-      <select id="flow-preset">
-        <option value="">Choose a topic, or type your own below…</option>
-        <option value="The life of a queued call, from arrival to answer to reporting">The life of a queued call, from arrival to answer to reporting</option>
-        <option value="Setting up call recording in Telviva through to QA review in QueueMetrics">Setting up call recording through to QA review</option>
-      </select>
-    </div>
     <textarea id="flow-question" class="ask-textarea" placeholder="Describe the process you want reconstructed…" rows="2"></textarea>
     <button id="flow-run" class="btn-primary">Generate flow</button>
     <div id="flow-output" class="flow-output"></div>
@@ -150,13 +183,6 @@
       <p>Turn a topic into a structured briefing memo &mdash; overview, key definitions, cross-references between the documents, and open questions a reviewer should still chase down.</p>
     </div>
     <p class="drafting-note">Drafting aid, not legal advice &mdash; every citation should be checked against the original document before you rely on it.</p>
-    <div class="ask-box">
-      <select id="brief-preset">
-        <option value="">Choose a topic, or type your own below…</option>
-        <option value="Call recording and quality assurance">Call recording and quality assurance</option>
-        <option value="Queue behaviour and reporting">Queue behaviour and reporting</option>
-      </select>
-    </div>
     <textarea id="brief-question" class="ask-textarea" placeholder="Describe the topic to brief…" rows="2"></textarea>
     <button id="brief-run" class="btn-primary">Generate brief</button>
     <div id="brief-output" class="brief-output"></div>
@@ -168,10 +194,7 @@
       <h2>Chunk Explorer</h2>
       <p>How each document was split for retrieval. Every segment below is a real chunk with page provenance &mdash; hover to inspect.</p>
     </div>
-    <div class="chunk-doc-select" id="chunk-doc-select">
-      <button class="filter-chip active" data-doc="telviva">Telviva 4.2 &middot; <span id="chunk-count-telviva">&mdash;</span> chunks</button>
-      <button class="filter-chip" data-doc="queuemetrics">QueueMetrics &middot; <span id="chunk-count-queuemetrics">&mdash;</span> chunks</button>
-    </div>
+    <div class="chunk-doc-select" id="chunk-doc-select"><!-- filled by js --></div>
     <div class="chunk-strip" id="chunk-strip"></div>
     <div class="chunk-detail" id="chunk-detail">
       <p class="patch-hint">Hover or tap a segment to preview that chunk.</p>
@@ -193,16 +216,8 @@
           <h3>Ask across documents</h3>
           <span class="demo-badge live-badge">Live</span>
         </div>
-        <p class="insight-desc">Ask a question that spans both manuals. This retrieves the top matching chunks and asks Claude to answer strictly from them, with citations back to page numbers.</p>
-        <div class="ask-box">
-          <select id="ask-preset">
-            <option value="">Choose a sample question, or type your own below…</option>
-            <option value="How would a dropped call get investigated across both systems?">How would a dropped call get investigated across both systems?</option>
-            <option value="Where do Telviva and QueueMetrics both define &quot;queue&quot;, and do the definitions agree?">Where do Telviva and QueueMetrics both define "queue", and do the definitions agree?</option>
-            <option value="What configuration steps are shared between call recording in Telviva and QA review in QueueMetrics?">What configuration steps are shared between call recording and QA review?</option>
-          </select>
-        </div>
-        <textarea id="ask-question" class="ask-textarea" placeholder="Or ask your own question about either manual…" rows="2"></textarea>
+        <p class="insight-desc">Ask a question that spans your uploaded documents. This retrieves the top matching chunks and asks Claude to answer strictly from them, with citations back to page numbers.</p>
+        <textarea id="ask-question" class="ask-textarea" placeholder="Ask a question about your uploaded documents…" rows="2"></textarea>
         <button id="ask-run" class="btn-primary">Generate answer</button>
         <div id="ask-output" class="ai-output"></div>
         <div id="ask-sources" class="ai-sources"></div>
@@ -214,14 +229,7 @@
           <span class="demo-badge live-badge">Live</span>
         </div>
         <p class="insight-desc">Turns a cross-referenced cluster of chunks into a plain-language narrative &mdash; the same mechanic that, on a legal document set, would turn a folder of filings into a coherent case timeline.</p>
-        <div class="ask-box">
-          <select id="story-preset">
-            <option value="">Choose a cluster to narrate, or type your own below…</option>
-            <option value="The life of a queued call, from arrival to answer to reporting">The life of a queued call, from arrival to answer to reporting</option>
-            <option value="Setting up call recording in Telviva through to QA review in QueueMetrics">Setting up call recording, end to end</option>
-          </select>
-        </div>
-        <textarea id="story-question" class="ask-textarea" placeholder="Or describe your own topic to narrate…" rows="2"></textarea>
+        <textarea id="story-question" class="ask-textarea" placeholder="Describe a topic to narrate across documents…" rows="2"></textarea>
         <button id="story-run" class="btn-primary">Generate story</button>
         <div id="story-output" class="ai-output"></div>
         <div id="story-sources" class="ai-sources"></div>
@@ -232,16 +240,8 @@
           <h3>Conflict Finder</h3>
           <span class="demo-badge live-badge">Live</span>
         </div>
-        <p class="insight-desc">The feature a legal document set actually needs: instead of answering a question, this actively hunts for places where the two manuals define, describe, or handle the same thing <em>differently</em> &mdash; contradictions, terminology drift, or gaps between them. On a real case file, this is how you'd find where a witness statement conflicts with a contract, or where two filings disagree.</p>
-        <div class="ask-box">
-          <select id="conflict-preset">
-            <option value="">Choose a topic to check for conflicts, or type your own below…</option>
-            <option value="How each system defines and measures a &quot;queue&quot;">How each system defines and measures a "queue"</option>
-            <option value="Call recording — who controls it and how it's accessed">Call recording — who controls it and how it's accessed</option>
-            <option value="What counts as an &quot;answered&quot; call">What counts as an "answered" call</option>
-          </select>
-        </div>
-        <textarea id="conflict-question" class="ask-textarea" placeholder="Or name a topic covered in both manuals to check for conflicts…" rows="2"></textarea>
+        <p class="insight-desc">Instead of answering a question, this actively hunts for places where your documents define, describe, or handle the same thing <em>differently</em> &mdash; contradictions, terminology drift, or gaps between them. On a real case file, this is how you'd find where a witness statement conflicts with a contract, or where two filings disagree.</p>
+        <textarea id="conflict-question" class="ask-textarea" placeholder="Name a topic covered in multiple documents to check for conflicts…" rows="2"></textarea>
         <button id="conflict-run" class="btn-primary">Find conflicts</button>
         <div id="conflict-output" class="ai-output"></div>
         <div id="conflict-sources" class="ai-sources"></div>
@@ -253,13 +253,6 @@
           <span class="demo-badge live-badge">Live</span>
         </div>
         <p class="insight-desc">Give it a claim or a position, and it looks for the strongest grounded pushback against it &mdash; genuine counterpoints from the documents, not manufactured ones. On a real case, this is how you stress-test your own argument before the other side does.</p>
-        <div class="ask-box">
-          <select id="devil-preset">
-            <option value="">Choose a sample claim, or type your own below…</option>
-            <option value="QueueMetrics gives a complete and reliable picture of agent performance on its own">QueueMetrics gives a complete and reliable picture of agent performance on its own</option>
-            <option value="Any call that was recorded in Telviva can be assumed to be reviewable in QueueMetrics">Any call that was recorded in Telviva can be assumed to be reviewable in QueueMetrics</option>
-          </select>
-        </div>
         <textarea id="devil-question" class="ask-textarea" placeholder="State a claim or position to stress-test…" rows="2"></textarea>
         <button id="devil-run" class="btn-primary">Stress-test this</button>
         <div id="devil-output" class="devil-output"></div>

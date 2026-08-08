@@ -5,38 +5,46 @@
     docs: {}, // id -> {meta, chunks}
     crossref: [],
     searchDocFilter: "all",
-    chunkDoc: "telviva",
+    chunkDoc: null,
     activeTerm: null,
     binder: []
   };
 
-  const DOC_META = {
-    telviva: {
-      title: "Telviva Enswitch 4.2",
-      sub: "PBX / Enswitch Admin Guide",
-      desc: "The hosted-PBX side: call handling, extensions, IVR, messaging and call control for the Telviva Enswitch platform."
-    },
-    queuemetrics: {
-      title: "QueueMetrics 26.01",
-      sub: "Call Center Analytics Manual",
-      desc: "The analytics layer that sits on top of Asterisk-based queues: reporting, QA, recordings and wallboards."
-    }
-  };
+  const DOC_META = {}; // populated dynamically from /api/documents — no document is ever hardcoded
 
   // ---------- Data loading ----------
+  // This project starts with an empty document set. Everything here is
+  // populated from D1 via /api/documents once real PDFs are uploaded —
+  // no static placeholder content ships with this codebase.
   async function loadData(){
-    const [tv, qm, cr, images, graph] = await Promise.all([
-      fetch('data/telviva.json').then(r => r.json()),
-      fetch('data/queuemetrics.json').then(r => r.json()),
-      fetch('data/crossref.json').then(r => r.json()),
-      fetch('data/images-manifest.json').then(r => r.json()),
-      fetch('data/concept-graph.json').then(r => r.json())
-    ]);
-    state.docs.telviva = { meta: DOC_META.telviva, chunks: tv };
-    state.docs.queuemetrics = { meta: DOC_META.queuemetrics, chunks: qm };
-    state.crossref = cr;
-    state.images = images; // { telviva: {"41": "images/telviva/p041.jpg", ...}, queuemetrics: {...} }
-    state.graph = graph; // { nodes: [...], edges: [...] }
+    state.docs = {};
+    state.crossref = [];
+    state.images = {};
+    state.graph = { nodes: [], edges: [] };
+
+    try{
+      const res = await fetch('/api/documents');
+      const data = await res.json();
+      if(res.ok && data.documents){
+        await Promise.all(data.documents.map(async d => {
+          DOC_META[d.id] = { title: d.title, sub: d.subtitle || '', desc: d.subtitle || '' };
+          let chunks = [];
+          try{
+            const cRes = await fetch(`/api/chunks?doc=${encodeURIComponent(d.id)}`);
+            const cData = await cRes.json();
+            if(cRes.ok && cData.chunks) chunks = cData.chunks;
+          } catch(e){ console.error(`Failed to load chunks for ${d.id}:`, e); }
+          state.docs[d.id] = { meta: DOC_META[d.id], chunks, pages: d.pages };
+        }));
+      } else if(!res.ok || data.error){
+        console.error('/api/documents returned an error:', data.error || res.status);
+      }
+    } catch(e){
+      console.error('Could not reach /api/documents — is the D1 binding configured?', e);
+    }
+
+    const docIds = Object.keys(state.docs);
+    if(docIds.length) state.chunkDoc = docIds[0];
   }
 
   // Find the best associated screenshot for a chunk, checking every page it spans.
@@ -80,13 +88,13 @@
 
   // ---------- Hero ----------
   function renderHeroStats(){
-    const tv = state.docs.telviva.chunks, qm = state.docs.queuemetrics.chunks;
-    const totalWords = wordCount(tv) + wordCount(qm);
-    const totalChunks = tv.length + qm.length;
-    const totalImages = Object.keys(state.images.telviva).length + Object.keys(state.images.queuemetrics).length;
+    const allDocs = Object.values(state.docs);
+    const totalChunks = allDocs.reduce((sum, d) => sum + d.chunks.length, 0);
+    const totalWords = allDocs.reduce((sum, d) => sum + wordCount(d.chunks), 0);
+    const totalImages = Object.values(state.images || {}).reduce((sum, m) => sum + Object.keys(m || {}).length, 0);
     const el = document.getElementById('hero-stats');
     el.innerHTML = `
-      <div class="hero-stat"><span class="num">2</span><span class="lbl">Documents</span></div>
+      <div class="hero-stat"><span class="num">${allDocs.length}</span><span class="lbl">Documents</span></div>
       <div class="hero-stat"><span class="num">${totalChunks}</span><span class="lbl">Chunks</span></div>
       <div class="hero-stat"><span class="num">${totalWords.toLocaleString()}</span><span class="lbl">Words indexed</span></div>
       <div class="hero-stat"><span class="num">${totalImages}</span><span class="lbl">Screenshots extracted</span></div>
@@ -147,14 +155,27 @@
   // ---------- Search ----------
   function initSearch(){
     const input = document.getElementById('search-input');
-    const chips = document.querySelectorAll('#search-filters .filter-chip');
+    renderSearchFilters();
+    input.addEventListener('input', () => runSearch(input.value));
+  }
+
+  function renderSearchFilters(){
+    const el = document.getElementById('search-filters');
+    const docIds = Object.keys(state.docs);
+    el.innerHTML = `<button class="filter-chip active" data-doc="all">All documents</button>`
+      + docIds.map(id => `<button class="filter-chip" data-doc="${escapeHtml(id)}">${escapeHtml(DOC_META[id].title)}</button>`).join('');
+
+    const chips = el.querySelectorAll('.filter-chip');
     chips.forEach(c => c.addEventListener('click', () => {
       chips.forEach(x => x.classList.remove('active'));
       c.classList.add('active');
       state.searchDocFilter = c.dataset.doc;
-      runSearch(input.value);
+      runSearch(document.getElementById('search-input').value);
     }));
-    input.addEventListener('input', () => runSearch(input.value));
+
+    document.getElementById('search-meta').textContent = docIds.length
+      ? `Search across ${docIds.length} document${docIds.length===1?'':'s'}.`
+      : 'Upload a document to start searching.';
   }
 
   function escapeHtml(s){
@@ -166,7 +187,10 @@
     const results = document.getElementById('search-results');
     query = (query || '').trim();
     if(!query){
-      meta.textContent = 'Type to search across 26,000+ and 116,000+ words of extracted text.';
+      const docIds = Object.keys(state.docs);
+      meta.textContent = docIds.length
+        ? `Search across ${docIds.length} document${docIds.length===1?'':'s'}.`
+        : 'Upload a document to start searching.';
       results.innerHTML = '';
       return;
     }
@@ -235,11 +259,94 @@
   }
 
   // ---------- Patch bay ----------
+  const PATCHBAY_STOP = new Set(("the a an of to in and or for with on at by from is are be this that as it its "
+    + "into your you can which will use used using not have has if then than when where each all any also more "
+    + "most such other only over under between within without per via one two three these those their they them "
+    + "our we may might should would could must page click select field name type value default system following "
+    + "section screen shown below example figure information time date fields option options settings menu tab "
+    + "window view number numbers current text list report reports data file server").split(/\s+/));
+
+  function termFreqByChunk(chunks){
+    const freq = {};
+    for(const c of chunks){
+      const seen = new Set();
+      const words = (c.text.toLowerCase().match(/[a-z][a-z0-9\-]{2,}/g) || []);
+      for(const w of words){
+        if(PATCHBAY_STOP.has(w) || w.length <= 3) continue;
+        seen.add(w);
+      }
+      for(const w of seen) freq[w] = (freq[w] || 0) + 1;
+    }
+    return freq;
+  }
+
+  function bestChunkForTerm(chunks, term){
+    let best = null, bestScore = 0;
+    const re = new RegExp('\\b' + term.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + '\\w*\\b', 'gi');
+    for(const c of chunks){
+      const score = (c.text.match(re) || []).length;
+      if(score > bestScore){ bestScore = score; best = c; }
+    }
+    return best;
+  }
+
+  function computeCrossRef(docA, docB, topN = 10){
+    const chunksA = state.docs[docA].chunks, chunksB = state.docs[docB].chunks;
+    const freqA = termFreqByChunk(chunksA), freqB = termFreqByChunk(chunksB);
+    const shared = Object.keys(freqA).filter(w => freqB[w] && freqA[w] >= 2 && freqB[w] >= 2);
+    shared.sort((a,b) => (freqB[b]+freqA[b]) - (freqB[a]+freqA[a]));
+    return shared.slice(0, topN).map(term => {
+      const cA = bestChunkForTerm(chunksA, term), cB = bestChunkForTerm(chunksB, term);
+      if(!cA || !cB) return null;
+      return { term, [docA]: cA, [docB]: cB };
+    }).filter(Boolean);
+  }
+
+  function initPatchbay(){
+    const selA = document.getElementById('patchbay-doc-a');
+    const selB = document.getElementById('patchbay-doc-b');
+    const docIds = Object.keys(state.docs);
+    const opts = docIds.map(id => `<option value="${escapeHtml(id)}">${escapeHtml(DOC_META[id].title)}</option>`).join('');
+    selA.innerHTML = '<option value="">Choose a document…</option>' + opts;
+    selB.innerHTML = '<option value="">Choose a document…</option>' + opts;
+    selA.addEventListener('change', renderPatchbay);
+    selB.addEventListener('change', renderPatchbay);
+    if(docIds.length >= 2){ selA.value = docIds[0]; selB.value = docIds[1]; renderPatchbay(); }
+    window.addEventListener('resize', debounce(drawCables, 150));
+  }
+
   function renderPatchbay(){
-    const tvCol = document.getElementById('jacks-telviva');
-    const qmCol = document.getElementById('jacks-queuemetrics');
-    tvCol.innerHTML = state.crossref.map(c => jackHtml(c.term)).join('');
-    qmCol.innerHTML = state.crossref.map(c => jackHtml(c.term)).join('');
+    const docA = document.getElementById('patchbay-doc-a').value;
+    const docB = document.getElementById('patchbay-doc-b').value;
+    const wrap = document.getElementById('patchbay-wrap');
+    const detail = document.getElementById('patch-detail');
+
+    if(!docA || !docB || docA === docB){
+      wrap.hidden = true;
+      detail.innerHTML = docA && docA === docB
+        ? '<p class="patch-hint">Choose two different documents to compare.</p>'
+        : '<p class="patch-hint">Choose two documents above to find terms they share.</p>';
+      return;
+    }
+
+    const crossref = computeCrossRef(docA, docB);
+    state.patchbayCrossref = crossref;
+    state.patchbayDocs = [docA, docB];
+
+    if(crossref.length === 0){
+      wrap.hidden = true;
+      detail.innerHTML = '<p class="patch-hint">No strongly shared terms found between these two documents.</p>';
+      return;
+    }
+
+    wrap.hidden = false;
+    document.getElementById('patchbay-label-a').textContent = DOC_META[docA].title;
+    document.getElementById('patchbay-label-b').textContent = DOC_META[docB].title;
+
+    const jacksA = document.getElementById('jacks-a');
+    const jacksB = document.getElementById('jacks-b');
+    jacksA.innerHTML = crossref.map(c => jackHtml(c.term)).join('');
+    jacksB.innerHTML = crossref.map(c => jackHtml(c.term)).join('');
 
     document.querySelectorAll('.jack').forEach(j => {
       j.addEventListener('click', () => selectTerm(j.dataset.term));
@@ -247,39 +354,41 @@
       j.addEventListener('mouseleave', () => highlightCable(j.dataset.term, false));
     });
 
+    detail.innerHTML = '<p class="patch-hint">Select a term above to see the matched passage from each document, side by side.</p>';
     drawCables();
-    window.addEventListener('resize', debounce(drawCables, 150));
   }
 
   function jackHtml(term){
-    return `<div class="jack" data-term="${term}"><span class="dot"></span><span class="jack-label">${term}</span></div>`;
+    return `<div class="jack" data-term="${escapeHtml(term)}"><span class="dot"></span><span class="jack-label">${escapeHtml(term)}</span></div>`;
   }
 
   function drawCables(){
     const svg = document.getElementById('cable-svg');
-    const tvJacks = [...document.getElementById('jacks-telviva').children];
-    const qmJacks = [...document.getElementById('jacks-queuemetrics').children];
+    const jacksA = document.getElementById('jacks-a');
+    const jacksB = document.getElementById('jacks-b');
+    if(!jacksA || !jacksB) return;
+    const aJacks = [...jacksA.children], bJacks = [...jacksB.children];
     const wrap = document.querySelector('.patchbay-wrap');
-    if(!wrap || tvJacks.length === 0) return;
-    const wrapRect = wrap.getBoundingClientRect();
+    if(!wrap || aJacks.length === 0) return;
     const svgRect = svg.getBoundingClientRect();
     svg.setAttribute('viewBox', `0 0 ${svgRect.width || 120} ${svgRect.height || 400}`);
 
     let paths = '';
-    state.crossref.forEach((c, i) => {
-      const l = tvJacks[i].getBoundingClientRect();
-      const r = qmJacks[i].getBoundingClientRect();
+    (state.patchbayCrossref || []).forEach((c, i) => {
+      if(!aJacks[i] || !bJacks[i]) return;
+      const l = aJacks[i].getBoundingClientRect();
+      const r = bJacks[i].getBoundingClientRect();
       const y1 = l.top + l.height/2 - svgRect.top;
       const y2 = r.top + r.height/2 - svgRect.top;
       const w = svgRect.width || 120;
       const midx = w/2;
-      paths += `<path class="cable-path" data-term="${c.term}" d="M0,${y1} C${midx},${y1} ${midx},${y2} ${w},${y2}"/>`;
+      paths += `<path class="cable-path" data-term="${escapeHtml(c.term)}" d="M0,${y1} C${midx},${y1} ${midx},${y2} ${w},${y2}"/>`;
     });
     svg.innerHTML = paths;
   }
 
   function highlightCable(term, on){
-    const path = document.querySelector(`.cable-path[data-term="${term}"]`);
+    const path = document.querySelector(`.cable-path[data-term="${CSS.escape(term)}"]`);
     if(path) path.classList.toggle('active', on);
   }
 
@@ -287,25 +396,26 @@
     state.activeTerm = term;
     document.querySelectorAll('.jack').forEach(j => j.classList.toggle('active', j.dataset.term === term));
     document.querySelectorAll('.cable-path').forEach(p => p.classList.toggle('active', p.dataset.term === term));
-    const entry = state.crossref.find(c => c.term === term);
+    const entry = (state.patchbayCrossref || []).find(c => c.term === term);
     if(!entry) return;
+    const [docA, docB] = state.patchbayDocs;
     const detail = document.getElementById('patch-detail');
-    detail.innerHTML = `
-      <div class="patch-compare">
-        <div class="patch-compare-col" data-doc="telviva" data-cid="${entry.telviva.id}">
-          <h4>Telviva 4.2</h4>
-          <span class="pageref">p. ${entry.telviva.pages[0]}${entry.telviva.pages[1]!==entry.telviva.pages[0] ? '–'+entry.telviva.pages[1] : ''}${entry.telviva.heading ? ' &middot; ' + escapeHtml(entry.telviva.heading) : ''}</span>
-          <p class="patch-excerpt">&hellip;${escapeHtml(entry.telviva.excerpt)}&hellip;</p>
+
+    function colHtml(doc){
+      const chunk = entry[doc];
+      const pages = chunk.pages[1] !== chunk.pages[0] ? `${chunk.pages[0]}–${chunk.pages[1]}` : `${chunk.pages[0]}`;
+      const excerpt = chunk.text.slice(0, 220);
+      return `
+        <div class="patch-compare-col" data-doc="${escapeHtml(doc)}" data-cid="${escapeHtml(chunk.id)}">
+          <h4>${escapeHtml(DOC_META[doc].title)}</h4>
+          <span class="pageref">p. ${pages}${chunk.heading ? ' &middot; ' + escapeHtml(chunk.heading) : ''}</span>
+          <p class="patch-excerpt">&hellip;${escapeHtml(excerpt)}&hellip;</p>
           <button class="btn-expand" type="button">Show full chunk ▾</button>
         </div>
-        <div class="patch-compare-col" data-doc="queuemetrics" data-cid="${entry.queuemetrics.id}">
-          <h4>QueueMetrics 26.01</h4>
-          <span class="pageref">p. ${entry.queuemetrics.pages[0]}${entry.queuemetrics.pages[1]!==entry.queuemetrics.pages[0] ? '–'+entry.queuemetrics.pages[1] : ''}${entry.queuemetrics.heading ? ' &middot; ' + escapeHtml(entry.queuemetrics.heading) : ''}</span>
-          <p class="patch-excerpt">&hellip;${escapeHtml(entry.queuemetrics.excerpt)}&hellip;</p>
-          <button class="btn-expand" type="button">Show full chunk ▾</button>
-        </div>
-      </div>
-    `;
+      `;
+    }
+
+    detail.innerHTML = `<div class="patch-compare">${colHtml(docA)}${colHtml(docB)}</div>`;
     detail.querySelectorAll('.btn-expand').forEach(btn => {
       btn.addEventListener('click', () => {
         const col = btn.closest('.patch-compare-col');
@@ -337,19 +447,44 @@
 
   // ---------- Chunk explorer ----------
   function initChunkExplorer(){
-    document.querySelectorAll('#chunk-doc-select .filter-chip').forEach(chip => {
+    renderChunkDocSelector();
+    renderChunkStrip();
+  }
+
+  function renderChunkDocSelector(){
+    const el = document.getElementById('chunk-doc-select');
+    const docIds = Object.keys(state.docs);
+    if(docIds.length === 0){
+      el.innerHTML = '';
+      return;
+    }
+    el.innerHTML = docIds.map(id => `
+      <button class="filter-chip${id === state.chunkDoc ? ' active' : ''}" data-doc="${escapeHtml(id)}">
+        ${escapeHtml(DOC_META[id].title)} &middot; <span>${state.docs[id].chunks.length}</span> chunks
+      </button>
+    `).join('');
+    el.querySelectorAll('.filter-chip').forEach(chip => {
       chip.addEventListener('click', () => {
-        document.querySelectorAll('#chunk-doc-select .filter-chip').forEach(c => c.classList.remove('active'));
+        el.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
         chip.classList.add('active');
         state.chunkDoc = chip.dataset.doc;
         renderChunkStrip();
       });
     });
-    renderChunkStrip();
   }
 
   function renderChunkStrip(){
     const strip = document.getElementById('chunk-strip');
+    const detail = document.getElementById('chunk-detail');
+    const statsEl = document.getElementById('chunk-stats');
+
+    if(!state.chunkDoc || !state.docs[state.chunkDoc]){
+      strip.innerHTML = '';
+      statsEl.innerHTML = '';
+      detail.innerHTML = '<p class="patch-hint">Nothing uploaded yet — head to the Upload tab to add a document.</p>';
+      return;
+    }
+
     const chunks = state.docs[state.chunkDoc].chunks;
     strip.innerHTML = chunks.map((c, i) => {
       const size = c.text.split(/\s+/).filter(Boolean).length;
@@ -361,17 +496,21 @@
       seg.addEventListener('click', () => showChunkDetail(parseInt(seg.dataset.idx)));
     });
 
-    document.getElementById('chunk-count-telviva').textContent = state.docs.telviva.chunks.length;
-    document.getElementById('chunk-count-queuemetrics').textContent = state.docs.queuemetrics.chunks.length;
+    if(chunks.length === 0){
+      statsEl.innerHTML = '';
+      detail.innerHTML = '<p class="patch-hint">This document has no chunks (extraction may have failed).</p>';
+      return;
+    }
 
     const words = chunks.map(c => c.text.split(/\s+/).filter(Boolean).length);
     const avg = Math.round(words.reduce((a,b)=>a+b,0) / words.length);
-    document.getElementById('chunk-stats').innerHTML = `
+    statsEl.innerHTML = `
       <div><span class="num">${chunks.length}</span><span class="lbl">Total chunks</span></div>
       <div><span class="num">${avg}</span><span class="lbl">Avg words / chunk</span></div>
       <div><span class="num">${Math.max(...words)}</span><span class="lbl">Largest chunk</span></div>
       <div><span class="num">${maxPage(chunks)}</span><span class="lbl">Pages covered</span></div>
     `;
+    showChunkDetail(0);
   }
 
   function showChunkDetail(idx){
@@ -394,6 +533,14 @@
   function renderConceptGraph(){
     const svg = document.getElementById('concept-svg');
     const { nodes, edges } = state.graph;
+
+    if(!nodes || nodes.length === 0){
+      svg.innerHTML = '';
+      document.getElementById('graph-detail').innerHTML =
+        '<p class="patch-hint">No concept graph yet — this is computed after documents are uploaded. (Not yet wired up in this version; coming in a follow-up.)</p>';
+      return;
+    }
+
     const nodeById = {};
     nodes.forEach(n => nodeById[n.id] = n);
 
@@ -441,12 +588,13 @@
     });
 
     const detail = document.getElementById('graph-detail');
-    const tvCount = hits.filter(h => h.doc === 'telviva').length;
-    const qmCount = hits.filter(h => h.doc === 'queuemetrics').length;
+    const byDoc = {};
+    hits.forEach(h => { byDoc[h.doc] = (byDoc[h.doc] || 0) + 1; });
+    const countLabel = Object.entries(byDoc).map(([doc, n]) => `${n} in ${DOC_META[doc] ? DOC_META[doc].title : doc}`).join(', ');
     const highlightRe = new RegExp('(' + term.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') + '\\w*)', 'ig');
 
     detail.innerHTML = `
-      <p class="graph-detail-head">"${escapeHtml(term)}" &middot; ${tvCount} passage${tvCount===1?'':'s'} in Telviva, ${qmCount} in QueueMetrics</p>
+      <p class="graph-detail-head">"${escapeHtml(term)}" &middot; ${hits.length} passage${hits.length===1?'':'s'}${countLabel ? ' (' + escapeHtml(countLabel) + ')' : ''}</p>
       <div class="search-results" id="graph-results"></div>
     `;
     const resultsEl = document.getElementById('graph-results');
@@ -611,7 +759,7 @@
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
     doc.setTextColor(110);
-    doc.text(`Generated ${new Date().toLocaleString()} · ${state.binder.length} excerpt${state.binder.length===1?'':'s'} · Telviva Enswitch 4.2 & QueueMetrics 26.01`, margin, y);
+    doc.text(`Generated ${new Date().toLocaleString()} · ${state.binder.length} excerpt${state.binder.length===1?'':'s'} from ${Object.keys(state.docs).length} document${Object.keys(state.docs).length===1?'':'s'}`, margin, y);
     y += 28;
 
     doc.setDrawColor(210);
@@ -656,6 +804,164 @@
     doc.save(filename);
   }
 
+  // ---------- Upload (Tier 2 — real PDF ingestion) ----------
+  let pdfjsReady = false;
+  function ensurePdfJs(){
+    if(pdfjsReady) return;
+    if(window.pdfjsLib){
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      pdfjsReady = true;
+    }
+  }
+
+  function initUpload(){
+    const fileInput = document.getElementById('upload-file');
+    const dropLabel = document.getElementById('upload-drop');
+    const dropText = document.getElementById('upload-drop-label');
+    const fields = document.getElementById('upload-fields');
+    const titleInput = document.getElementById('upload-title');
+    const subtitleInput = document.getElementById('upload-subtitle');
+    const runBtn = document.getElementById('upload-run');
+    const progress = document.getElementById('upload-progress');
+    const progressFill = document.getElementById('upload-progress-fill');
+    const progressLabel = document.getElementById('upload-progress-label');
+    const resultEl = document.getElementById('upload-result');
+
+    let selectedFile = null;
+
+    function handleFile(file){
+      if(!file || file.type !== 'application/pdf'){
+        resultEl.innerHTML = '<p class="patch-hint">Please choose a PDF file.</p>';
+        return;
+      }
+      selectedFile = file;
+      dropText.textContent = `Selected: ${file.name}`;
+      titleInput.value = file.name.replace(/\.pdf$/i, '').replace(/[_-]+/g, ' ');
+      fields.hidden = false;
+      resultEl.innerHTML = '';
+    }
+
+    fileInput.addEventListener('change', () => handleFile(fileInput.files[0]));
+    dropLabel.addEventListener('dragover', e => { e.preventDefault(); dropLabel.classList.add('dragover'); });
+    dropLabel.addEventListener('dragleave', () => dropLabel.classList.remove('dragover'));
+    dropLabel.addEventListener('drop', e => {
+      e.preventDefault();
+      dropLabel.classList.remove('dragover');
+      if(e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+    });
+
+    runBtn.addEventListener('click', async () => {
+      if(!selectedFile) return;
+      const title = titleInput.value.trim();
+      if(!title){ resultEl.innerHTML = '<p class="patch-hint">Give it a title first.</p>'; return; }
+
+      ensurePdfJs();
+      if(!window.pdfjsLib){
+        resultEl.innerHTML = '<p class="patch-hint">PDF library failed to load — check your connection and try again.</p>';
+        return;
+      }
+
+      runBtn.disabled = true;
+      progress.hidden = false;
+      resultEl.innerHTML = '';
+
+      try{
+        const arrayBuffer = await selectedFile.arrayBuffer();
+        const pdf = await window.pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const pages = [];
+        for(let i = 1; i <= pdf.numPages; i++){
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          const text = content.items.map(it => it.str).join(' ');
+          pages.push(text);
+          const pct = Math.round((i / pdf.numPages) * 100);
+          progressFill.style.width = pct + '%';
+          progressLabel.textContent = `Extracting page ${i} of ${pdf.numPages}…`;
+        }
+
+        progressLabel.textContent = 'Uploading and chunking…';
+        const res = await fetch('/api/upload', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ title, subtitle: subtitleInput.value.trim(), pages })
+        });
+        const data = await res.json();
+        if(!res.ok || data.error){
+          resultEl.innerHTML = `<p class="patch-hint">Error: ${escapeHtml(data.error || 'Upload failed.')}</p>`;
+        } else {
+          resultEl.innerHTML = `<p class="upload-success">✓ "${escapeHtml(data.title)}" uploaded — ${data.pages} pages, ${data.chunks} chunks, by ${escapeHtml(data.uploaded_by)}.</p>`;
+          fields.hidden = true;
+          dropText.textContent = 'Choose a PDF, or drag one here';
+          fileInput.value = '';
+          selectedFile = null;
+          loadUploadedDocs();
+        }
+      } catch(e){
+        resultEl.innerHTML = `<p class="patch-hint">Error extracting or uploading: ${escapeHtml(String(e.message || e))}</p>`;
+      } finally {
+        runBtn.disabled = false;
+        progress.hidden = true;
+        progressFill.style.width = '0%';
+      }
+    });
+
+    loadUploadedDocs();
+  }
+
+  async function loadUploadedDocs(){
+    const el = document.getElementById('upload-doc-list');
+    if(!el) return;
+    el.innerHTML = '<p class="patch-hint">Loading…</p>';
+    try{
+      const res = await fetch('/api/documents');
+      const data = await res.json();
+      if(!res.ok || data.error){
+        el.innerHTML = `<p class="patch-hint">Error loading documents: ${escapeHtml(data.error || 'unknown')}</p>`;
+        return;
+      }
+      if(!data.documents || data.documents.length === 0){
+        el.innerHTML = '<p class="patch-hint">Nothing uploaded yet.</p>';
+        return;
+      }
+      el.innerHTML = `
+        <table class="binder-table">
+          <thead><tr><th>Title</th><th>Pages</th><th>Chunks</th><th>Uploaded by</th><th>Date</th><th></th></tr></thead>
+          <tbody>
+            ${data.documents.map(d => `
+              <tr data-id="${escapeHtml(d.id)}">
+                <td>${escapeHtml(d.title)}${d.subtitle ? `<br><span class="ch-pages">${escapeHtml(d.subtitle)}</span>` : ''}</td>
+                <td>${d.pages}</td>
+                <td>${d.chunk_count}</td>
+                <td>${escapeHtml(d.uploaded_by || '—')}</td>
+                <td>${escapeHtml((d.created_at || '').slice(0,10))}</td>
+                <td><button type="button" class="binder-remove doc-delete" title="Delete">✕</button></td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+      el.querySelectorAll('.doc-delete').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const row = btn.closest('tr');
+          const id = row.dataset.id;
+          if(!confirm(`Delete "${id}" and all its chunks? This can't be undone.`)) return;
+          btn.disabled = true;
+          try{
+            const res = await fetch(`/api/documents/${encodeURIComponent(id)}`, { method: 'DELETE' });
+            const data = await res.json();
+            if(!res.ok || data.error){ alert('Delete failed: ' + (data.error || 'unknown')); btn.disabled = false; return; }
+            loadUploadedDocs();
+          } catch(e){
+            alert('Delete failed: ' + e.message);
+            btn.disabled = false;
+          }
+        });
+      });
+    } catch(e){
+      el.innerHTML = `<p class="patch-hint">Network error loading documents.</p>`;
+    }
+  }
+
   function initBinder(){
     loadBinder();
     updateBinderBadge();
@@ -672,10 +978,16 @@
 
   // ---------- Citation parsing (shared by Flow / Brief / Devil's Advocate) ----------
   function parseCitation(str){
-    const m = str.match(/(Telviva|QueueMetrics)[^,]*,\s*p\.?\s*(\d+)/i);
+    // Generic — matches "<Document Title>, p.34" for whatever documents are
+    // actually loaded, rather than any hardcoded document name.
+    const m = str.match(/^(.+?),\s*p\.?\s*(\d+)/i);
     if(!m) return null;
-    const doc = /telviva/i.test(m[1]) ? 'telviva' : 'queuemetrics';
-    return { doc, page: parseInt(m[2], 10) };
+    const titleGuess = m[1].trim().toLowerCase();
+    const page = parseInt(m[2], 10);
+    const docId = Object.keys(DOC_META).find(id => (DOC_META[id].title || '').toLowerCase() === titleGuess)
+      || Object.keys(DOC_META).find(id => (DOC_META[id].title || '').toLowerCase().includes(titleGuess) || titleGuess.includes((DOC_META[id].title || '').toLowerCase()));
+    if(!docId) return null;
+    return { doc: docId, page };
   }
 
   function findChunkForCitation(citationStr){
@@ -838,20 +1150,16 @@
   }
 
   function initFlow(){
-    const preset = document.getElementById('flow-preset');
     const q = document.getElementById('flow-question');
     const out = document.getElementById('flow-output');
-    preset.addEventListener('change', () => { if(preset.value) q.value = preset.value; });
     document.getElementById('flow-run').addEventListener('click', (e) => {
       runStructuredGenerate(q.value, 'flow', out, e.currentTarget, renderFlow);
     });
   }
 
   function initBrief(){
-    const preset = document.getElementById('brief-preset');
     const q = document.getElementById('brief-question');
     const out = document.getElementById('brief-output');
-    preset.addEventListener('change', () => { if(preset.value) q.value = preset.value; });
     document.getElementById('brief-run').addEventListener('click', (e) => {
       runStructuredGenerate(q.value, 'brief', out, e.currentTarget, renderBrief);
     });
@@ -920,38 +1228,30 @@
   }
 
   function initInsights(){
-    const askPreset = document.getElementById('ask-preset');
     const askQuestion = document.getElementById('ask-question');
     const askOut = document.getElementById('ask-output');
     const askSources = document.getElementById('ask-sources');
-    askPreset.addEventListener('change', () => { if(askPreset.value) askQuestion.value = askPreset.value; });
     document.getElementById('ask-run').addEventListener('click', (e) => {
       runGenerate(askQuestion.value, 'answer', askOut, askSources, e.currentTarget);
     });
 
-    const storyPreset = document.getElementById('story-preset');
     const storyQuestion = document.getElementById('story-question');
     const storyOut = document.getElementById('story-output');
     const storySources = document.getElementById('story-sources');
-    storyPreset.addEventListener('change', () => { if(storyPreset.value) storyQuestion.value = storyPreset.value; });
     document.getElementById('story-run').addEventListener('click', (e) => {
       runGenerate(storyQuestion.value, 'story', storyOut, storySources, e.currentTarget);
     });
 
-    const conflictPreset = document.getElementById('conflict-preset');
     const conflictQuestion = document.getElementById('conflict-question');
     const conflictOut = document.getElementById('conflict-output');
     const conflictSources = document.getElementById('conflict-sources');
-    conflictPreset.addEventListener('change', () => { if(conflictPreset.value) conflictQuestion.value = conflictPreset.value; });
     document.getElementById('conflict-run').addEventListener('click', (e) => {
       runGenerate(conflictQuestion.value, 'conflict', conflictOut, conflictSources, e.currentTarget);
     });
 
-    const devilPreset = document.getElementById('devil-preset');
     const devilQuestion = document.getElementById('devil-question');
     const devilOut = document.getElementById('devil-output');
     const devilSources = document.getElementById('devil-sources');
-    devilPreset.addEventListener('change', () => { if(devilPreset.value) devilQuestion.value = devilPreset.value; });
     document.getElementById('devil-run').addEventListener('click', (e) => {
       runStructuredGenerate(devilQuestion.value, 'devil', devilOut, e.currentTarget, renderDevil, devilSources);
     });
@@ -966,7 +1266,7 @@
       document.querySelector('main').innerHTML = `
         <div class="load-error">
           <h2>Something failed to load</h2>
-          <p>One of the data files under <code>/data</code> didn't load correctly, so the app can't start. Open the browser console (F12) for the exact error — it'll usually say which file and why.</p>
+          <p>Couldn't load the app. Open the browser console (F12) for the exact error.</p>
           <p class="load-error-detail">${escapeHtml(String(e && e.message || e))}</p>
         </div>`;
       console.error('Docs init failed:', e);
@@ -976,13 +1276,14 @@
     renderHeroPatchbay();
     renderLibrary();
     initSearch();
-    renderPatchbay();
+    initPatchbay();
     renderConceptGraph();
     initChunkExplorer();
     initFlow();
     initBrief();
     initInsights();
     initBinder();
+    initUpload();
   }
 
   document.addEventListener('DOMContentLoaded', init);
